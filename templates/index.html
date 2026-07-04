@@ -1,0 +1,425 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Commander Land Base Generator</title>
+  <style>
+    :root {
+      color-scheme: light dark;
+      --bg: #0f1115;
+      --panel: #171a21;
+      --border: #2a2f3a;
+      --text: #e6e8eb;
+      --muted: #9aa3ad;
+      --accent: #6ea8fe;
+      --accent-2: #f5a524;
+      --good: #4ade80;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.5;
+    }
+    .wrap { max-width: 860px; margin: 0 auto; padding: 2rem 1.25rem 4rem; }
+    h1 { font-size: 1.5rem; margin-bottom: 0.25rem; }
+    .subtitle { color: var(--muted); margin-top: 0; margin-bottom: 1.5rem; font-size: 0.95rem; }
+
+    form.panel {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 1.25rem;
+      display: grid;
+      grid-template-columns: 2fr 1fr 1fr;
+      gap: 0.9rem;
+      margin-bottom: 1.5rem;
+    }
+    form.panel .full { grid-column: 1 / -1; }
+    label { display: block; font-size: 0.8rem; color: var(--muted); margin-bottom: 0.3rem; }
+    input[type=text], input[type=number] {
+      width: 100%;
+      padding: 0.5rem 0.6rem;
+      border-radius: 6px;
+      border: 1px solid var(--border);
+      background: #0d0f13;
+      color: var(--text);
+      font-size: 0.95rem;
+    }
+    button {
+      cursor: pointer;
+      border: none;
+      border-radius: 6px;
+      padding: 0.6rem 1.1rem;
+      font-size: 0.95rem;
+      font-weight: 600;
+    }
+    button.primary { background: var(--accent); color: #0d0f13; }
+    button.primary:hover { filter: brightness(1.08); }
+    button.ghost {
+      background: transparent;
+      border: 1px solid var(--border);
+      color: var(--text);
+    }
+    button.ghost:hover { border-color: var(--accent); }
+
+    .error {
+      background: #3a1a1a;
+      border: 1px solid #7a2e2e;
+      color: #ffb4b4;
+      border-radius: 8px;
+      padding: 0.75rem 1rem;
+      margin-bottom: 1.5rem;
+    }
+
+    .panel { background: var(--panel); border: 1px solid var(--border); border-radius: 10px; padding: 1.25rem; margin-bottom: 1.25rem; }
+    .panel h2 { margin-top: 0; font-size: 1.05rem; }
+    .meta { color: var(--muted); font-size: 0.9rem; margin-bottom: 0.75rem; }
+
+    .commander-header { display: flex; gap: 1.25rem; align-items: flex-start; }
+    .commander-header img {
+      width: 160px;
+      max-width: 40vw;
+      border-radius: 10px;
+      border: 1px solid var(--border);
+      flex-shrink: 0;
+    }
+    .mana-pips { display: flex; gap: 0.35rem; margin-top: 0.4rem; }
+    .mana-pips img { width: 22px; height: 22px; }
+
+    ul.lands { list-style: none; margin: 0; padding: 0; }
+    ul.lands li {
+      display: flex;
+      justify-content: space-between;
+      padding: 0.35rem 0;
+      border-bottom: 1px dashed var(--border);
+      font-size: 0.92rem;
+    }
+    ul.lands li:last-child { border-bottom: none; }
+    .tag {
+      font-size: 0.75rem;
+      padding: 0.1rem 0.5rem;
+      border-radius: 999px;
+      white-space: nowrap;
+    }
+    .tag.auto { background: rgba(245, 165, 36, 0.18); color: var(--accent-2); }
+    .tag.pct { background: rgba(110, 168, 254, 0.15); color: var(--accent); }
+    .tag.none { background: rgba(154, 163, 173, 0.15); color: var(--muted); }
+
+    .card-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+      gap: 0.9rem;
+    }
+    .card-thumb { text-align: center; font-size: 0.8rem; }
+    .card-thumb .art-wrap {
+      position: relative;
+      border-radius: 9px;
+      overflow: hidden;
+      border: 1px solid var(--border);
+      background: #0d0f13;
+      aspect-ratio: 5 / 7;
+    }
+    .card-thumb img.card-art {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      display: block;
+    }
+    .card-thumb .no-art {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      height: 100%;
+      color: var(--muted);
+      font-size: 0.75rem;
+      padding: 0.5rem;
+    }
+    .card-thumb .caption { margin-top: 0.4rem; color: var(--muted); }
+    .card-thumb .caption .name { color: var(--text); display: block; margin-bottom: 0.2rem; }
+    .card-thumb .art-wrap .count-overlay {
+      position: absolute;
+      inset: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: linear-gradient(to top, rgba(0,0,0,0.75), rgba(0,0,0,0.15) 55%);
+    }
+    .card-thumb .art-wrap .count-overlay span {
+      font-size: 2rem;
+      font-weight: 800;
+      color: #fff;
+      text-shadow: 0 2px 6px rgba(0,0,0,0.8);
+    }
+
+    details summary { cursor: pointer; color: var(--muted); font-size: 0.9rem; margin-top: 0.5rem; }
+
+    textarea {
+      width: 100%;
+      min-height: 220px;
+      background: #0d0f13;
+      color: var(--text);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 0.75rem;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: 0.9rem;
+      resize: vertical;
+    }
+    .copy-row { display: flex; align-items: center; gap: 0.75rem; margin-top: 0.75rem; }
+    #copy-status { color: var(--good); font-size: 0.85rem; opacity: 0; transition: opacity 0.2s; }
+    #copy-status.show { opacity: 1; }
+
+    @media (max-width: 640px) {
+      form.panel { grid-template-columns: 1fr 1fr; }
+      form.panel .full { grid-column: 1 / -1; }
+    }
+
+    #loading-overlay {
+      position: fixed;
+      inset: 0;
+      background: rgba(15, 17, 21, 0.88);
+      backdrop-filter: blur(2px);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      z-index: 1000;
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity 0.15s ease;
+    }
+    #loading-overlay.show { opacity: 1; pointer-events: all; }
+    .loading-card { text-align: center; }
+    .spinner {
+      width: 56px;
+      height: 56px;
+      margin: 0 auto 1.1rem;
+      border-radius: 50%;
+      border: 5px solid var(--border);
+      border-top-color: var(--accent);
+      border-right-color: var(--accent-2);
+      animation: spin 0.9s linear infinite;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    .loading-title { font-weight: 600; font-size: 1.05rem; margin-bottom: 0.35rem; }
+    .loading-status { color: var(--muted); font-size: 0.9rem; min-height: 1.3em; }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <h1>Commander Land Base Generator</h1>
+    <p class="subtitle">Scryfall + EDHREC powered land base builder. --lands is always a hard cap.</p>
+
+    <form class="panel" method="post" id="generate-form">
+      <div class="full">
+        <label for="commander">Commander name</label>
+        <input type="text" id="commander" name="commander" placeholder="Korvold, Fae-Cursed King"
+               value="{{ form_values.commander }}" required>
+      </div>
+      <div>
+        <label for="lands">Total lands</label>
+        <input type="number" id="lands" name="lands" min="1" value="{{ form_values.lands }}">
+      </div>
+      <div>
+        <label for="min_basics">Min basics per color</label>
+        <input type="number" id="min_basics" name="min_basics" min="0" value="{{ form_values.min_basics }}">
+      </div>
+      <div>
+        <label for="edhrec_pool">EDHREC Lands pool</label>
+        <input type="number" id="edhrec_pool" name="edhrec_pool" min="0" value="{{ form_values.edhrec_pool }}">
+      </div>
+      <div>
+        <label for="utility_pool">EDHREC Utility Lands pool</label>
+        <input type="number" id="utility_pool" name="utility_pool" min="0" value="{{ form_values.utility_pool }}">
+      </div>
+      <div class="full">
+        <button type="submit" class="primary" id="generate-btn">Generate land base</button>
+      </div>
+    </form>
+
+    <div id="loading-overlay">
+      <div class="loading-card">
+        <div class="spinner"></div>
+        <div class="loading-title">Building your land base&hellip;</div>
+        <div class="loading-status" id="loading-status">Looking up commander on Scryfall</div>
+      </div>
+    </div>
+
+    {% if error %}
+      <div class="error">{{ error }}</div>
+    {% endif %}
+
+    {% if result %}
+      <div class="panel">
+        <h2>Archidekt import list ({{ result.total_output }} lands)</h2>
+        <textarea id="decklist" readonly>{{ result.decklist_text }}</textarea>
+        <div class="copy-row">
+          <button type="button" class="ghost" onclick="copyDecklist()">Copy to clipboard</button>
+          <span id="copy-status">Copied!</span>
+        </div>
+      </div>
+
+      <div class="panel commander-header">
+        {% if result.image_url %}
+          <img src="{{ result.image_url }}" alt="{{ result.real_name }}">
+        {% endif %}
+        <div>
+          <h2>{{ result.real_name }}</h2>
+          <div class="meta">Target land count: {{ result.total_lands }}</div>
+          <div class="mana-pips">
+            {% if result.colors %}
+              {% for c in result.colors %}
+                <img src="https://svgs.scryfall.io/card-symbols/{{ c }}.svg" alt="{{ c }}" title="{{ c }}">
+              {% endfor %}
+            {% else %}
+              <img src="https://svgs.scryfall.io/card-symbols/C.svg" alt="Colorless" title="Colorless">
+            {% endif %}
+          </div>
+        </div>
+      </div>
+
+      <div class="panel">
+        <h2>Final nonbasic lands ({{ result.nonbasic_names|length }})</h2>
+        <div class="meta">
+          {{ result.forced_lands|length }} auto-included, {{ result.kept|length }} of
+          {{ result.ranked_remaining_count }} remaining candidates ranked by inclusion rate
+        </div>
+        <div class="card-grid">
+          {% for name in result.forced_lands %}
+            <div class="card-thumb">
+              <div class="art-wrap">
+                {% if result.land_images.get(name) %}
+                  <img class="card-art" src="{{ result.land_images[name] }}" alt="{{ name }}">
+                {% else %}
+                  <div class="no-art">{{ name }}</div>
+                {% endif %}
+              </div>
+              <div class="caption">
+                <span class="name">{{ name }}</span>
+                <span class="tag auto">auto-included</span>
+              </div>
+            </div>
+          {% endfor %}
+          {% for name, data in result.kept %}
+            <div class="card-thumb">
+              <div class="art-wrap">
+                {% if result.land_images.get(name) %}
+                  <img class="card-art" src="{{ result.land_images[name] }}" alt="{{ name }}">
+                {% else %}
+                  <div class="no-art">{{ name }}</div>
+                {% endif %}
+              </div>
+              <div class="caption">
+                <span class="name">{{ name }}</span>
+                {% if data %}
+                  <span class="tag pct">{{ "%.0f"|format(inclusion_pct(data) * 100) }}%</span>
+                {% else %}
+                  <span class="tag none">no EDHREC data</span>
+                {% endif %}
+              </div>
+            </div>
+          {% endfor %}
+        </div>
+
+        {% if result.cut %}
+          <details>
+            <summary>Cut to fit the {{ result.total_lands }}-land cap ({{ result.cut|length }} lands)</summary>
+            <div class="card-grid" style="margin-top: 0.75rem;">
+              {% for name, data in result.cut %}
+                <div class="card-thumb">
+                  <div class="art-wrap">
+                    {% if result.land_images.get(name) %}
+                      <img class="card-art" src="{{ result.land_images[name] }}" alt="{{ name }}">
+                    {% else %}
+                      <div class="no-art">{{ name }}</div>
+                    {% endif %}
+                  </div>
+                  <div class="caption">
+                    <span class="name">{{ name }}</span>
+                    {% if data %}
+                      <span class="tag pct">{{ "%.0f"|format(inclusion_pct(data) * 100) }}%</span>
+                    {% else %}
+                      <span class="tag none">no EDHREC data</span>
+                    {% endif %}
+                  </div>
+                </div>
+              {% endfor %}
+            </div>
+          </details>
+        {% endif %}
+      </div>
+
+      <div class="panel">
+        <h2>Basic lands ({{ result.basics_total }})</h2>
+        <div class="card-grid">
+          {% for land, count in result.basics.items() %}
+            <div class="card-thumb">
+              <div class="art-wrap">
+                {% if result.land_images.get(land) %}
+                  <img class="card-art" src="{{ result.land_images[land] }}" alt="{{ land }}">
+                {% else %}
+                  <div class="no-art">{{ land }}</div>
+                {% endif %}
+                <div class="count-overlay"><span>{{ count }}x</span></div>
+              </div>
+              <div class="caption"><span class="name">{{ land }}</span></div>
+            </div>
+          {% endfor %}
+        </div>
+        {% if not result.min_honored %}
+          <p class="meta">Note: couldn't fully honor the {{ result.min_basics }}-per-color minimum within your
+             {{ result.total_lands }}-land cap -- gave basics as even a split as possible instead.</p>
+        {% endif %}
+      </div>
+
+      {% if log_lines %}
+        <details class="panel">
+          <summary>Fetch log</summary>
+          <pre style="white-space: pre-wrap; font-size: 0.85rem; color: var(--muted);">{{ log_lines|join("\n") }}</pre>
+        </details>
+      {% endif %}
+    {% endif %}
+  </div>
+
+  <script>
+    function copyDecklist() {
+      const text = document.getElementById('decklist').value;
+      navigator.clipboard.writeText(text).then(() => {
+        const status = document.getElementById('copy-status');
+        status.classList.add('show');
+        setTimeout(() => status.classList.remove('show'), 1500);
+      });
+    }
+
+    const LOADING_STEPS = [
+      'Looking up commander on Scryfall',
+      'Pulling dual/shock/fetch/bond lands for its colors',
+      'Fetching EDHREC inclusion data',
+      'Ranking candidates by inclusion rate',
+      'Applying auto-includes and basics',
+      'Fetching card art',
+    ];
+
+    document.getElementById('generate-form').addEventListener('submit', function (e) {
+      if (!e.target.checkValidity()) return;
+
+      document.getElementById('generate-btn').disabled = true;
+      const overlay = document.getElementById('loading-overlay');
+      overlay.classList.add('show');
+
+      const statusEl = document.getElementById('loading-status');
+      let step = 0;
+      statusEl.textContent = LOADING_STEPS[0];
+      setInterval(() => {
+        step = (step + 1) % LOADING_STEPS.length;
+        statusEl.textContent = LOADING_STEPS[step];
+      }, 1400);
+      // The form submits normally (full page reload) -- the overlay stays
+      // up until the new page arrives and replaces this one.
+    });
+  </script>
+</body>
+</html>
