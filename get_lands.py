@@ -243,12 +243,29 @@ def build_land_query(colors, category_query):
     return f"type:land {id_clause} ({category_query})"
 
 
+def build_fetch_land_query(colors):
+    """Fetch lands (Windswept Heath, etc.) have an EMPTY color_identity on
+    Scryfall -- they name basic land types in plain oracle text rather than
+    with colored mana symbols, so `id<=colors` matches every fetch land for
+    every commander regardless of colors. Filter on which basics they can
+    actually find instead. Returns None for colorless commanders (no basics
+    to fetch)."""
+    if not colors:
+        return None
+    basic_clause = " or ".join(f'o:"{BASIC_LAND_BY_COLOR[c]}"' for c in colors)
+    return f"type:land is:fetchland ({basic_clause})"
+
+
 def get_utility_lands(colors):
     """Return {category_name: [card names]} for every LAND_CATEGORIES entry."""
     results = {}
     for category_name, category_query in LAND_CATEGORIES.items():
-        query = build_land_query(colors, category_query)
-        cards = search_all(query)
+        if category_name == "Fetch Lands":
+            query = build_fetch_land_query(colors)
+        else:
+            query = build_land_query(colors, category_query)
+
+        cards = search_all(query) if query else []
         seen = []
         for card in cards:
             if card["name"] not in seen:
