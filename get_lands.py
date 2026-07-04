@@ -48,7 +48,7 @@ HEADERS = {
 }
 
 DEFAULT_TOTAL_LANDS = 37
-DEFAULT_EDHREC_POOL = 20     # how many top EDHREC lands to pull in as ranking candidates
+DEFAULT_EDHREC_POOL = 10     # how many top EDHREC lands to pull in as ranking candidates
 DEFAULT_MIN_BASICS = 1       # minimum copies of each basic land type, if it fits
 
 # Utility land categories to search for on Scryfall. Each is a Scryfall
@@ -67,7 +67,18 @@ BASIC_LAND_BY_COLOR = {
     "R": "Mountain",
     "G": "Forest",
 }
-BASIC_LAND_NAMES = set(BASIC_LAND_BY_COLOR.values()) | {"Wastes"}
+SNOW_BASIC_LAND_BY_COLOR = {
+    "W": "Snow-Covered Plains",
+    "U": "Snow-Covered Island",
+    "B": "Snow-Covered Swamp",
+    "R": "Snow-Covered Mountain",
+    "G": "Snow-Covered Forest",
+}
+BASIC_LAND_NAMES = (
+    set(BASIC_LAND_BY_COLOR.values())
+    | set(SNOW_BASIC_LAND_BY_COLOR.values())
+    | {"Wastes", "Snow-Covered Wastes"}
+)
 
 # Lands that always get an auto-included slot (ahead of the ranked EDHREC/
 # Scryfall pool), regardless of inclusion rate.
@@ -92,6 +103,10 @@ class CommanderNotFoundError(Exception):
     """Raised when Scryfall has no card matching the given name."""
 
 
+class NotACommanderError(Exception):
+    """Raised when the resolved card can't legally lead a Commander deck."""
+
+
 def get_commander(name):
     """Look up a commander by (fuzzy) name and return its Scryfall card object."""
     resp = requests.get(
@@ -108,6 +123,23 @@ def get_commander(name):
     return resp.json()
 
 
+def is_valid_commander(real_name):
+    """True if Scryfall's own `is:commander` filter accepts this exact card
+    -- i.e. it's a legendary creature (or has an explicit "can be your
+    commander" ability), not just any card. Delegates to Scryfall instead
+    of reimplementing that legality logic ourselves."""
+    resp = requests.get(
+        f"{SCRYFALL_ROOT}/cards/search",
+        params={"q": f'is:commander !"{real_name}"'},
+        headers=HEADERS,
+        timeout=10,
+    )
+    if resp.status_code == 404:
+        return False
+    resp.raise_for_status()
+    return bool(resp.json().get("data"))
+
+
 def get_card_image(card):
     """Best available card image URL, handling double-faced cards (whose
     images live under card_faces instead of top-level image_uris)."""
@@ -119,6 +151,26 @@ def get_card_image(card):
         if face_images:
             return face_images.get("normal") or face_images.get("large") or face_images.get("small")
     return None
+
+
+def get_card_face_images(card):
+    """Image URL per face, in order, for cards with separate face art
+    (transform/modal double-faced cards) -- otherwise a single-item list
+    with the card's one image (or an empty list if no art is available).
+    Used for the commander portrait so the UI can offer a flip button."""
+    faces = card.get("card_faces") or []
+    face_urls = []
+    for face in faces:
+        image_uris = face.get("image_uris")
+        if image_uris:
+            face_urls.append(
+                image_uris.get("normal") or image_uris.get("large") or image_uris.get("small")
+            )
+    face_urls = [url for url in face_urls if url]
+    if face_urls:
+        return face_urls
+    single = get_card_image(card)
+    return [single] if single else []
 
 
 def get_card_images(names):
@@ -294,16 +346,19 @@ def copy_to_clipboard(text):
     return False
 
 
-def distribute_basics(colors, remaining, min_per_color=DEFAULT_MIN_BASICS):
+def distribute_basics(colors, remaining, min_per_color=DEFAULT_MIN_BASICS, use_snow=False):
     """Split `remaining` land slots across the commander's basic land types.
     This NEVER returns more than `remaining` total lands -- it's a hard cap.
     Every type gets `min_per_color` first if there's room; if there isn't
     enough room to give everyone the minimum, it falls back to a plain even
     split of whatever's available (which may be below the minimum) and
     reports that the minimum wasn't fully honored.
-    Colorless commanders get Wastes. Returns (counts_dict, minimum_honored)."""
+    Colorless commanders get Wastes (or Snow-Covered Wastes). Returns
+    (counts_dict, minimum_honored)."""
     remaining = max(remaining, 0)
-    basics = [BASIC_LAND_BY_COLOR[c] for c in colors] if colors else ["Wastes"]
+    land_by_color = SNOW_BASIC_LAND_BY_COLOR if use_snow else BASIC_LAND_BY_COLOR
+    wastes = "Snow-Covered Wastes" if use_snow else "Wastes"
+    basics = [land_by_color[c] for c in colors] if colors else [wastes]
     n = len(basics)
     reserved = min_per_color * n
 
@@ -339,19 +394,28 @@ def generate_land_base(commander_name, total_lands,
                         edhrec_pool=DEFAULT_EDHREC_POOL,
                         utility_pool=DEFAULT_EDHREC_POOL,
                         min_basics=DEFAULT_MIN_BASICS,
+                        use_snow_basics=False,
                         log=print):
     """Run the full pipeline (Scryfall + EDHREC gathering, ranking, auto-
     includes, basics) for one commander and return a dict with every piece
     a caller might want to display. `log` is called with progress/diagnostic
     messages as they happen -- pass a no-op or a list.append to capture them
     instead of printing. Raises CommanderNotFoundError if Scryfall doesn't
-    recognize the commander name."""
+    recognize the commander name, or NotACommanderError if it resolves to a
+    real card that isn't actually legal to lead a Commander deck."""
     log(f"\nLooking up '{commander_name}' on Scryfall...")
     commander = get_commander(commander_name)
     real_name = commander["name"]
+
+    if not is_valid_commander(real_name):
+        raise NotACommanderError(
+            f"'{real_name}' can't be your commander -- it's not a legendary "
+            f"creature (or other card) with a \"can be your commander\" ability."
+        )
+
     colors = commander.get("color_identity", [])
     color_str = "".join(colors) if colors else "Colorless"
-    image_url = get_card_image(commander)
+    image_urls = get_card_face_images(commander)
 
     log(f"Found: {real_name}")
     log(f"Color Identity: {color_str}")
@@ -411,7 +475,9 @@ def generate_land_base(commander_name, total_lands,
 
     # --- 5. Fill remaining slots with basics (never exceeds the cap) ---
     remaining_for_basics = total_lands - len(nonbasic_names)
-    basics, min_honored = distribute_basics(colors, remaining_for_basics, min_basics)
+    basics, min_honored = distribute_basics(
+        colors, remaining_for_basics, min_basics, use_snow=use_snow_basics
+    )
     basics_total = sum(basics.values())
 
     total_output = len(nonbasic_names) + basics_total
@@ -437,10 +503,11 @@ def generate_land_base(commander_name, total_lands,
         "real_name": real_name,
         "colors": colors,
         "color_str": color_str,
-        "image_url": image_url,
+        "image_urls": image_urls,
         "land_images": land_images,
         "total_lands": total_lands,
         "min_basics": min_basics,
+        "use_snow_basics": use_snow_basics,
         "utility_by_category": utility_by_category,
         "edhrec_lands_count": len(edhrec_lands),
         "edhrec_utility_count": len(edhrec_utility),
@@ -489,6 +556,10 @@ def main():
         help=f"Minimum copies of each basic land type, honored as long as "
              f"it fits within --lands (default {DEFAULT_MIN_BASICS})"
     )
+    parser.add_argument(
+        "-s", "--snow-basics", action="store_true",
+        help="Use Snow-Covered basics instead of regular ones"
+    )
     args = parser.parse_args()
 
     commander_name = " ".join(args.commander).strip()
@@ -511,8 +582,9 @@ def main():
             edhrec_pool=args.edhrec_pool,
             utility_pool=args.utility_pool,
             min_basics=args.min_basics,
+            use_snow_basics=args.snow_basics,
         )
-    except CommanderNotFoundError as e:
+    except (CommanderNotFoundError, NotACommanderError) as e:
         print(str(e))
         sys.exit(1)
 

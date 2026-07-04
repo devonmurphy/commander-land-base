@@ -49,6 +49,37 @@
       color: var(--text);
       font-size: 0.95rem;
     }
+    .autocomplete-wrap { position: relative; }
+    .suggestions {
+      position: absolute;
+      top: calc(100% + 4px);
+      left: 0;
+      right: 0;
+      z-index: 50;
+      list-style: none;
+      margin: 0;
+      padding: 0.3rem;
+      background: #0d0f13;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      max-height: 260px;
+      overflow-y: auto;
+      box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+      display: none;
+    }
+    .suggestions.show { display: block; }
+    .suggestions li {
+      padding: 0.45rem 0.6rem;
+      border-radius: 6px;
+      cursor: pointer;
+      font-size: 0.9rem;
+    }
+    .suggestions li:hover,
+    .suggestions li.active {
+      background: rgba(110, 168, 254, 0.16);
+      color: var(--accent);
+    }
+
     button {
       cursor: pointer;
       border: none;
@@ -66,6 +97,17 @@
     }
     button.ghost:hover { border-color: var(--accent); }
 
+    .checkbox-row { display: flex; align-items: center; }
+    .checkbox-label {
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+      font-size: 0.9rem;
+      color: var(--text);
+      cursor: pointer;
+    }
+    .checkbox-label input[type=checkbox] { width: 16px; height: 16px; accent-color: var(--accent); }
+
     .error {
       background: #3a1a1a;
       border: 1px solid #7a2e2e;
@@ -80,13 +122,31 @@
     .meta { color: var(--muted); font-size: 0.9rem; margin-bottom: 0.75rem; }
 
     .commander-header { display: flex; gap: 1.25rem; align-items: flex-start; }
-    .commander-header img {
+    .card-flip-wrap { position: relative; flex-shrink: 0; }
+    .card-flip-wrap img {
+      display: block;
       width: 160px;
       max-width: 40vw;
       border-radius: 10px;
       border: 1px solid var(--border);
-      flex-shrink: 0;
     }
+    .card-flip-img { transition: transform 0.15s ease, opacity 0.15s ease; }
+    .card-flip-img.flipping { transform: scaleX(0.05); opacity: 0.3; }
+    .flip-btn {
+      position: absolute;
+      bottom: 8px;
+      left: 50%;
+      transform: translateX(-50%);
+      background: rgba(13, 15, 19, 0.85);
+      color: var(--text);
+      border: 1px solid var(--border);
+      border-radius: 999px;
+      padding: 0.25rem 0.65rem;
+      font-size: 0.75rem;
+      cursor: pointer;
+      white-space: nowrap;
+    }
+    .flip-btn:hover { border-color: var(--accent); color: var(--accent); }
     .mana-pips { display: flex; gap: 0.35rem; margin-top: 0.4rem; }
     .mana-pips img { width: 22px; height: 22px; }
 
@@ -214,10 +274,11 @@
     <p class="subtitle">Scryfall + EDHREC powered land base builder. --lands is always a hard cap.</p>
 
     <form class="panel" method="post" id="generate-form">
-      <div class="full">
+      <div class="full autocomplete-wrap">
         <label for="commander">Commander name</label>
         <input type="text" id="commander" name="commander" placeholder="Korvold, Fae-Cursed King"
-               value="{{ form_values.commander }}" required>
+               value="{{ form_values.commander }}" autocomplete="off" required>
+        <ul class="suggestions" id="commander-suggestions"></ul>
       </div>
       <div>
         <label for="lands">Total lands</label>
@@ -234,6 +295,13 @@
       <div>
         <label for="utility_pool">EDHREC Utility Lands pool</label>
         <input type="number" id="utility_pool" name="utility_pool" min="0" value="{{ form_values.utility_pool }}">
+      </div>
+      <div class="full checkbox-row">
+        <label class="checkbox-label">
+          <input type="checkbox" id="snow_basics" name="snow_basics"
+                 {% if form_values.snow_basics %}checked{% endif %}>
+          Use Snow-Covered basics
+        </label>
       </div>
       <div class="full">
         <button type="submit" class="primary" id="generate-btn">Generate land base</button>
@@ -263,8 +331,17 @@
       </div>
 
       <div class="panel commander-header">
-        {% if result.image_url %}
-          <img src="{{ result.image_url }}" alt="{{ result.real_name }}">
+        {% if result.image_urls %}
+          <div class="card-flip-wrap">
+            <img id="commander-art" class="card-flip-img"
+                 src="{{ result.image_urls[0] }}"
+                 data-front="{{ result.image_urls[0] }}"
+                 {% if result.image_urls|length > 1 %}data-back="{{ result.image_urls[1] }}"{% endif %}
+                 alt="{{ result.real_name }}">
+            {% if result.image_urls|length > 1 %}
+              <button type="button" class="flip-btn" onclick="flipCommanderCard()" title="Show the other side">&#8635; Flip</button>
+            {% endif %}
+          </div>
         {% endif %}
         <div>
           <h2>{{ result.real_name }}</h2>
@@ -393,6 +470,121 @@
         setTimeout(() => status.classList.remove('show'), 1500);
       });
     }
+
+    function flipCommanderCard() {
+      const img = document.getElementById('commander-art');
+      const showingBack = img.dataset.showing === 'back';
+      img.classList.add('flipping');
+      setTimeout(() => {
+        img.src = showingBack ? img.dataset.front : img.dataset.back;
+        img.dataset.showing = showingBack ? 'front' : 'back';
+        img.classList.remove('flipping');
+      }, 150);
+    }
+
+    (function setUpCommanderAutocomplete() {
+      const input = document.getElementById('commander');
+      const list = document.getElementById('commander-suggestions');
+      let controller = null;
+      let debounceTimer = null;
+      let activeIndex = -1;
+
+      function hideSuggestions() {
+        list.classList.remove('show');
+        list.innerHTML = '';
+        activeIndex = -1;
+      }
+
+      function renderSuggestions(names) {
+        list.innerHTML = '';
+        activeIndex = -1;
+        if (!names.length) {
+          hideSuggestions();
+          return;
+        }
+        names.forEach((name) => {
+          const li = document.createElement('li');
+          li.textContent = name;
+          // mousedown (not click) fires before the input's blur, so the
+          // suggestion is still in the DOM when we read it.
+          li.addEventListener('mousedown', (e) => {
+            e.preventDefault();
+            input.value = name;
+            hideSuggestions();
+          });
+          list.appendChild(li);
+        });
+        list.classList.add('show');
+      }
+
+      async function fetchSuggestions(query) {
+        if (controller) controller.abort();
+        controller = new AbortController();
+        try {
+          // is:commander restricts results to cards that can actually lead
+          // a Commander deck (legendary creatures, or others with an
+          // explicit "can be your commander" ability) -- plain
+          // /cards/autocomplete would suggest any card by that substring.
+          const safeQuery = query.replace(/"/g, '');
+          const q = `is:commander name:"${safeQuery}"`;
+          const resp = await fetch(
+            'https://api.scryfall.com/cards/search?order=name&unique=cards&q=' + encodeURIComponent(q),
+            { signal: controller.signal }
+          );
+          if (resp.status === 404) {
+            renderSuggestions([]);
+            return;
+          }
+          if (!resp.ok) return;
+          const data = await resp.json();
+          const names = (data.data || []).slice(0, 20).map((card) => card.name);
+          renderSuggestions(names);
+        } catch (err) {
+          if (err.name !== 'AbortError') hideSuggestions();
+        }
+      }
+
+      input.addEventListener('input', () => {
+        const query = input.value.trim();
+        clearTimeout(debounceTimer);
+        if (query.length < 2) {
+          hideSuggestions();
+          return;
+        }
+        debounceTimer = setTimeout(() => fetchSuggestions(query), 200);
+      });
+
+      input.addEventListener('keydown', (e) => {
+        const items = list.querySelectorAll('li');
+        if (!items.length || !list.classList.contains('show')) return;
+
+        if (e.key === 'ArrowDown') {
+          e.preventDefault();
+          activeIndex = (activeIndex + 1) % items.length;
+        } else if (e.key === 'ArrowUp') {
+          e.preventDefault();
+          activeIndex = (activeIndex - 1 + items.length) % items.length;
+        } else if (e.key === 'Enter') {
+          if (activeIndex >= 0) {
+            e.preventDefault();
+            input.value = items[activeIndex].textContent;
+            hideSuggestions();
+          }
+          return;
+        } else if (e.key === 'Escape') {
+          hideSuggestions();
+          return;
+        } else {
+          return;
+        }
+
+        items.forEach((li, i) => li.classList.toggle('active', i === activeIndex));
+      });
+
+      document.addEventListener('click', (e) => {
+        if (!list.contains(e.target) && e.target !== input) hideSuggestions();
+      });
+    })();
 
     const LOADING_STEPS = [
       'Looking up commander on Scryfall',

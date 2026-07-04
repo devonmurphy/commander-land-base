@@ -18,6 +18,7 @@ from get_lands import (
     DEFAULT_EDHREC_POOL,
     DEFAULT_MIN_BASICS,
     DEFAULT_TOTAL_LANDS,
+    NotACommanderError,
     generate_land_base,
     inclusion_pct,
 )
@@ -43,6 +44,7 @@ def index():
         "edhrec_pool": DEFAULT_EDHREC_POOL,
         "utility_pool": DEFAULT_EDHREC_POOL,
         "min_basics": DEFAULT_MIN_BASICS,
+        "snow_basics": False,
     }
     result = None
     error = None
@@ -50,6 +52,7 @@ def index():
 
     if request.method == "POST":
         form_values["commander"] = request.form.get("commander", "").strip()
+        form_values["snow_basics"] = request.form.get("snow_basics") == "on"
         try:
             form_values["lands"] = _int_field(request.form, "lands", DEFAULT_TOTAL_LANDS)
             form_values["edhrec_pool"] = _int_field(request.form, "edhrec_pool", DEFAULT_EDHREC_POOL)
@@ -65,9 +68,10 @@ def index():
                 edhrec_pool=form_values["edhrec_pool"],
                 utility_pool=form_values["utility_pool"],
                 min_basics=form_values["min_basics"],
+                use_snow_basics=form_values["snow_basics"],
                 log=log_lines.append,
             )
-        except CommanderNotFoundError as e:
+        except (CommanderNotFoundError, NotACommanderError) as e:
             error = str(e)
         except ValueError as e:
             error = str(e)
